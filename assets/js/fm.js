@@ -194,9 +194,13 @@ MKX.fm = {
     const total  = Math.ceil(file.size / CHUNK);
     const tmpKey = 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-    this._setZipProgress(0, `Uploading ${file.name}…`, false);
     const uploadBtn = document.getElementById('zip-upload-btn');
     if (uploadBtn) uploadBtn.disabled = true;
+
+    // ── Show progress panel ────────────────────────────────
+    MKX.progress.start(`Uploading ${file.name}`, total);
+    MKX.progress.update(0, total, total > 1 ? `Chunk 1 of ${total}` : file.name);
+    this._setZipProgress(0, `Uploading ${file.name}…`, false);
 
     try {
       for (let c = 0; c < total; c++) {
@@ -217,12 +221,15 @@ MKX.fm = {
         if (data.error) throw new Error(data.error);
 
         const pct = Math.round(((c + 1) / total) * 100);
-        this._setZipProgress(pct, `Uploading… ${pct}% (${c + 1}/${total} chunks)`, false);
+        // Update both progress panel and zip zone bar
+        MKX.progress.update(c + 1, total, total > 1 ? `Chunk ${c + 1} / ${total}` : file.name);
+        this._setZipProgress(pct, `Uploading… ${pct}%  (${c + 1}/${total} chunks)`, false);
       }
 
       this._zipKey  = tmpKey;
       this._zipName = file.name;
       this._setZipProgress(100, `✓ ${file.name} uploaded. Click Extract.`, true);
+      MKX.progress.done(`${file.name} uploaded — click Extract to unzip`);
 
       // Enable extract button
       const extBtn = document.getElementById('zip-after-upload-extract');
@@ -235,6 +242,7 @@ MKX.fm = {
 
     } catch(e) {
       this._setZipProgress(0, '', false, true);
+      MKX.progress.error('ZIP upload failed: ' + e.message);
       MKX.notify.error('Upload failed: ' + e.message);
     } finally {
       if (uploadBtn) uploadBtn.disabled = false;
@@ -290,7 +298,14 @@ MKX.fm = {
     if (!MKX.state.currentRepo) { MKX.notify.error('No repository open.'); return; }
 
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner animate-spin"></i> Extracting…'; }
-    this._setZipProgress(50, 'Extracting files to GitHub repository…', false);
+    this._setZipProgress(50, 'Extracting…', false);
+
+    // ── Animated indeterminate progress ───────────────────
+    // PHP processes server-side — we estimate visually
+    MKX.progress.startAnim(
+      'Extracting ZIP…',
+      'Uploading files to GitHub repository…'
+    );
 
     try {
       const res = await fetch(`${this._fmApi}?action=extract_zip`, {
@@ -323,20 +338,36 @@ MKX.fm = {
       this._zipKey  = null;
       this._zipName = '';
 
-      const msg = `✓ ${data.extracted}/${data.total} files extracted.` +
-                  (data.skipped   ? ` ${data.skipped} skipped.`       : '') +
-                  (data.errors?.length ? ` ${data.errors.length} error(s).` : '');
+      const doneMsg = `${data.extracted}/${data.total} files extracted` +
+                      (data.skipped ? `, ${data.skipped} skipped` : '') +
+                      (data.errors?.length ? `, ${data.errors.length} error(s)` : '');
 
-      data.errors?.length ? MKX.notify.warn(msg) : MKX.notify.success(msg);
+      // ── Show result in progress panel ─────────────────
+      if (data.errors?.length) {
+        MKX.progress.animDone(doneMsg);
+        MKX.notify.warn('⚠ ' + doneMsg);
+        console.warn('Extract errors:', data.errors);
+      } else {
+        MKX.progress.animDone('✓ ' + doneMsg);
+        MKX.notify.success('✓ ' + doneMsg);
+      }
 
-      // Show errors in console for debugging
-      if (data.errors?.length) console.warn('Extract errors:', data.errors);
+      // Add extracted file chips to panel
+      if (data.created?.length) {
+        data.created.slice(0, 6).forEach(f => MKX.progress.addFile(f, true));
+      }
+      if (data.errors?.length) {
+        data.errors.slice(0, 3).forEach(e => {
+          const parts = e.split(': ');
+          MKX.progress.addFile(parts[0] || e, false, parts[1] || '');
+        });
+      }
 
-      // Reload file list
       MKX.files.loadContents(dest || MKX.state.currentPath);
 
     } catch(e) {
       this._setZipProgress(0, '', false, true);
+      MKX.progress.animError('Extract failed: ' + e.message);
       MKX.notify.error('Extract failed: ' + e.message);
       if (btn) { btn.disabled = false; btn.textContent = 'Extract'; }
     }
