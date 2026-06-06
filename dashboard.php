@@ -1046,6 +1046,41 @@ $csrf   = $_SESSION['csrf_token'] ?? '';
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<!-- ═══════════════════════════════════════════════════════
+     UPLOAD / EXTRACT PROGRESS PANEL
+     ═══════════════════════════════════════════════════════ -->
+<div id="progress-panel" class="hidden">
+  <!-- Header bar -->
+  <div class="prog-header">
+    <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+      <div class="prog-spinner" id="prog-spinner">
+        <i class="fas fa-circle-notch animate-spin" id="prog-spin-icon"></i>
+      </div>
+      <span id="prog-title" class="prog-title-text">Uploading…</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px">
+      <span id="prog-pct" style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:#06B6D4;min-width:36px;text-align:right">0%</span>
+      <button id="prog-minimize-btn" title="Minimize" style="background:none;border:none;color:#64748B;cursor:pointer;padding:3px 6px;font-size:0.8rem;line-height:1">─</button>
+    </div>
+  </div>
+  <!-- Body (collapsible) -->
+  <div id="prog-body">
+    <!-- Progress bar -->
+    <div style="height:5px;background:rgba(148,163,184,0.12);border-radius:99px;overflow:hidden;margin-bottom:10px">
+      <div id="prog-bar" style="height:100%;width:0%;border-radius:99px;transition:width 0.35s ease;background:linear-gradient(90deg,#2563EB,#06B6D4)"></div>
+    </div>
+    <!-- Current file -->
+    <div id="prog-filename" style="font-size:0.78rem;color:#94A3B8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px">Preparing…</div>
+    <!-- Stats row -->
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span id="prog-count" style="font-size:0.72rem;color:#64748B;font-family:'JetBrains Mono',monospace"></span>
+      <span id="prog-status" style="font-size:0.72rem;color:#64748B"></span>
+    </div>
+    <!-- File list (last 4 completed) -->
+    <div id="prog-file-list" style="margin-top:8px;display:flex;flex-direction:column;gap:3px;max-height:80px;overflow:hidden"></div>
+  </div>
+</div>
+
 <!-- Three.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- GSAP -->
