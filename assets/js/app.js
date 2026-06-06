@@ -954,11 +954,23 @@ MKX.files = {
 
   async handleUpload(files) {
     if (!files?.length) return;
+    const fileArr     = Array.from(files);
+    const total       = fileArr.length;
     const currentPath = MKX.state.currentPath;
     const { owner, name: repoName } = MKX.state.currentRepo;
     let ok = 0;
+    let failed = 0;
 
-    for (const file of Array.from(files)) {
+    // ── Show progress panel ────────────────────────────────
+    MKX.progress.start(
+      total === 1 ? `Uploading ${fileArr[0].name}` : `Uploading ${total} files`,
+      total
+    );
+
+    for (let i = 0; i < fileArr.length; i++) {
+      const file = fileArr[i];
+      MKX.progress.update(i, total, file.name);
+
       try {
         const b64 = await this._readB64(file);
         const fp  = currentPath ? `${currentPath}/${file.name}` : file.name;
@@ -971,16 +983,30 @@ MKX.files = {
         await MKX.api.put('update_file', {}, {
           owner, repo: repoName, path: fp,
           content:        b64,
-          content_is_b64: true,   // Already base64 from FileReader — PHP must NOT re-encode
+          content_is_b64: true,
           sha,
           message: `Upload ${file.name} via MKX GitHub Cloud`,
         });
         ok++;
+        MKX.progress.addFile(file.name, true);
       } catch (e) {
+        failed++;
+        MKX.progress.addFile(file.name, false, e.message);
         MKX.notify.error(`Upload "${file.name}" failed: ${e.message}`);
       }
     }
-    if (ok > 0) { MKX.notify.success(`${ok} file${ok > 1 ? 's' : ''} uploaded!`); this.loadContents(currentPath); }
+
+    // ── Final state ────────────────────────────────────────
+    if (ok > 0) {
+      MKX.progress.done(
+        `${ok} file${ok > 1 ? 's' : ''} uploaded` +
+        (failed ? `, ${failed} failed` : '')
+      );
+      this.loadContents(currentPath);
+    } else {
+      MKX.progress.error('All uploads failed.');
+    }
+
     document.getElementById('file-upload-input').value = '';
   },
 
@@ -2522,3 +2548,153 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 't' && !e.ctrlKey && !e.metaKey) MKX.router.go('terminal');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+//  PROGRESS PANEL MODULE
+// ═══════════════════════════════════════════════════════════
+
+MKX.progress = {
+
+  _panel:    null,
+  _bar:      null,
+  _title:    null,
+  _filename: null,
+  _count:    null,
+  _status:   null,
+  _pct:      null,
+  _spinner:  null,
+  _spinIcon: null,
+  _fileList: null,
+  _chips:    [],
+  _animTimer:null,
+  _ready:    false,
+
+  /* ── Init (lazy) ─────────────────────────────────────── */
+  _init() {
+    if (this._ready) return;
+    this._panel    = document.getElementById('progress-panel');
+    this._bar      = document.getElementById('prog-bar');
+    this._title    = document.getElementById('prog-title');
+    this._filename = document.getElementById('prog-filename');
+    this._count    = document.getElementById('prog-count');
+    this._status   = document.getElementById('prog-status');
+    this._pct      = document.getElementById('prog-pct');
+    this._spinner  = document.getElementById('prog-spinner');
+    this._spinIcon = document.getElementById('prog-spin-icon');
+    this._fileList = document.getElementById('prog-file-list');
+
+    // Minimize toggle
+    document.getElementById('prog-minimize-btn')?.addEventListener('click', () => {
+      this._panel?.classList.toggle('minimized');
+      const btn = document.getElementById('prog-minimize-btn');
+      if (btn) btn.textContent = this._panel?.classList.contains('minimized') ? '□' : '─';
+    });
+
+    this._ready = true;
+  },
+
+  /* ── Start a new operation ──────────────────────────── */
+  start(title, total = 0) {
+    this._init();
+    this._chips = [];
+    if (!this._panel) return;
+
+    this._panel.classList.remove('hidden', 'minimized');
+
+    // Reset styles
+    if (this._bar)    { this._bar.style.width = '0%'; this._bar.style.background = 'linear-gradient(90deg,#2563EB,#06B6D4)'; this._bar.classList.remove('success'); }
+    if (this._spinner) { this._spinner.className = 'prog-spinner'; }
+    if (this._spinIcon){ this._spinIcon.className = 'fas fa-circle-notch animate-spin'; }
+    if (this._title)   this._title.textContent   = title;
+    if (this._filename)this._filename.textContent = 'Preparing…';
+    if (this._count)   this._count.textContent    = total > 1 ? `0 / ${total}` : '';
+    if (this._status)  this._status.textContent   = '';
+    if (this._pct)     this._pct.textContent       = '0%';
+    if (this._fileList)this._fileList.innerHTML    = '';
+  },
+
+  /* ── Update current file ────────────────────────────── */
+  update(done, total, filename) {
+    if (!this._ready) return;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (this._bar)     this._bar.style.width      = pct + '%';
+    if (this._pct)     this._pct.textContent       = pct + '%';
+    if (this._filename)this._filename.textContent  = filename ? `↑ ${filename}` : '…';
+    if (this._count)   this._count.textContent     = total > 1 ? `${done} / ${total} files` : '';
+  },
+
+  /* ── Add a completed file chip ──────────────────────── */
+  addFile(name, success, errMsg = '') {
+    if (!this._fileList) return;
+    const chip = document.createElement('div');
+    chip.className = `prog-file-chip ${success ? 'done' : 'error'}`;
+    chip.innerHTML = `<i class="fas ${success ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+                      <span style="overflow:hidden;text-overflow:ellipsis">${MKX.utils.escHtml(name)}</span>
+                      ${errMsg ? `<span style="color:#EF4444;margin-left:auto;flex-shrink:0"> — ${MKX.utils.escHtml(errMsg.slice(0,30))}</span>` : ''}`;
+    this._fileList.insertBefore(chip, this._fileList.firstChild);
+    // Keep only last 4
+    while (this._fileList.children.length > 4) {
+      this._fileList.removeChild(this._fileList.lastChild);
+    }
+  },
+
+  /* ── Done successfully ──────────────────────────────── */
+  done(msg) {
+    if (!this._ready) return;
+    if (this._bar)     { this._bar.style.width = '100%'; this._bar.style.background = 'linear-gradient(90deg,#10B981,#059669)'; this._bar.classList.add('success'); }
+    if (this._pct)     this._pct.textContent    = '100%';
+    if (this._spinner) this._spinner.className   = 'prog-spinner success';
+    if (this._spinIcon)this._spinIcon.className  = 'fas fa-check';
+    if (this._title)   this._title.textContent   = 'Done!';
+    if (this._filename)this._filename.textContent = msg;
+    if (this._count)   this._count.textContent   = '';
+    setTimeout(() => this.hide(), 4000);
+  },
+
+  /* ── Error state ────────────────────────────────────── */
+  error(msg) {
+    if (!this._ready) return;
+    if (this._bar)     this._bar.style.background = 'linear-gradient(90deg,#EF4444,#DC2626)';
+    if (this._spinner) this._spinner.className     = 'prog-spinner error';
+    if (this._spinIcon)this._spinIcon.className    = 'fas fa-exclamation-circle';
+    if (this._title)   this._title.textContent     = 'Failed';
+    if (this._filename)this._filename.textContent  = msg;
+    setTimeout(() => this.hide(), 5000);
+  },
+
+  /* ── Hide panel ─────────────────────────────────────── */
+  hide() {
+    if (this._panel) this._panel.classList.add('hidden');
+    this._stopAnim();
+  },
+
+  /* ── Animated indeterminate progress (for server ops) ── */
+  startAnim(title, hint = '') {
+    this.start(title, 0);
+    if (this._filename) this._filename.textContent = hint || 'Processing on server…';
+    if (this._count)    this._count.textContent    = '';
+    let pct = 0;
+    this._stopAnim();
+    this._animTimer = setInterval(() => {
+      // Ease-out toward 85% — never reaches 100% until done
+      pct += (85 - pct) * 0.018;
+      if (this._bar)  this._bar.style.width = pct.toFixed(1) + '%';
+      if (this._pct)  this._pct.textContent  = Math.floor(pct) + '%';
+    }, 250);
+  },
+
+  _stopAnim() {
+    if (this._animTimer) { clearInterval(this._animTimer); this._animTimer = null; }
+  },
+
+  /* ── Complete an animated operation ────────────────────── */
+  animDone(msg) {
+    this._stopAnim();
+    this.done(msg);
+  },
+
+  animError(msg) {
+    this._stopAnim();
+    this.error(msg);
+  },
+};
